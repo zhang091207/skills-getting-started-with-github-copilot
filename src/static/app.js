@@ -12,11 +12,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      while (activitySelect.options.length > 1) {
+        activitySelect.remove(1);
+      }
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
+        activityCard.dataset.maxParticipants = details.max_participants;
 
         const spotsLeft = details.max_participants - details.participants.length;
 
@@ -24,8 +28,46 @@ document.addEventListener("DOMContentLoaded", () => {
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <p><strong>Availability:</strong> <span class="spots-left">${spotsLeft} spots left</span></p>
+          <div class="participants-section">
+            <h5>Participants <span class="participant-count">(${details.participants.length})</span></h5>
+            <ul class="participants-list"></ul>
+          </div>
         `;
+
+        const participantsList = activityCard.querySelector(".participants-list");
+        details.participants.forEach((email) => {
+          const participant = document.createElement("li");
+          participant.className = "participant-item";
+
+          const emailLabel = document.createElement("span");
+          emailLabel.className = "participant-email";
+          emailLabel.textContent = email;
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "remove-participant";
+          removeButton.setAttribute("aria-label", `Unregister ${email} from ${name}`);
+          removeButton.title = "Unregister participant";
+          removeButton.dataset.activity = name;
+          removeButton.dataset.email = email;
+          removeButton.innerHTML = `
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" />
+            </svg>
+            <span>Unregister</span>
+          `;
+
+          participant.append(emailLabel, removeButton);
+          participantsList.appendChild(participant);
+        });
+
+        if (details.participants.length === 0) {
+          const emptyState = document.createElement("li");
+          emptyState.className = "participant-empty";
+          emptyState.textContent = "No participants yet";
+          participantsList.appendChild(emptyState);
+        }
 
         activitiesList.appendChild(activityCard);
 
@@ -40,6 +82,48 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error fetching activities:", error);
     }
   }
+
+  activitiesList.addEventListener("click", async (event) => {
+    const removeButton = event.target.closest("button.remove-participant");
+    if (!removeButton) {
+      return;
+    }
+
+    const { activity, email } = removeButton.dataset;
+    removeButton.disabled = true;
+
+    try {
+      const response = await fetch(
+        `/activities/${encodeURIComponent(activity)}/signup?email=${encodeURIComponent(email)}`,
+        { method: "DELETE" }
+      );
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to unregister participant");
+      }
+
+      const activityCard = removeButton.closest(".activity-card");
+      const participantsList = activityCard.querySelector(".participants-list");
+      removeButton.closest(".participant-item").remove();
+
+      const participantCount = participantsList.querySelectorAll(".participant-item").length;
+      activityCard.querySelector(".participant-count").textContent = `(${participantCount})`;
+      activityCard.querySelector(".spots-left").textContent =
+        `${Number(activityCard.dataset.maxParticipants) - participantCount} spots left`;
+
+      if (participantCount === 0) {
+        const emptyState = document.createElement("li");
+        emptyState.className = "participant-empty";
+        emptyState.textContent = "No participants yet";
+        participantsList.appendChild(emptyState);
+      }
+    } catch (error) {
+      messageDiv.textContent = error.message || "Failed to unregister participant";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+    }
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -62,6 +146,7 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
